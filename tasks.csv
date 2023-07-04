@@ -1,0 +1,22 @@
+﻿task,subtask,duration,consequential
+Conceptualization and Planning,Requirements Gathering,7,Yes
+Conceptualization and Planning,Stakeholder Identification,7,Yes
+Conceptualization and Planning,Feasibility Study,7,Yes
+Conceptualization and Planning,Risk Assessment,7,Yes
+System Design and Architecture,Identify Data Sources,7,Yes
+System Design and Architecture,Design Data Processing System,14,Yes
+System Design and Architecture,Design Prediction Model,14,Yes
+System Design and Architecture,Design Optimization Model,14,Yes
+System Design and Architecture,Design User Interface,21,Yes
+Development,Data Collection,28,Yes
+Development,Data Processing System Development,28,Yes
+Development,Prediction Model Development,28,Yes
+Development,Optimization Model Development,28,Yes
+Development,User Interface Development,28,Yes
+Testing,Unit Testing,14,Yes
+Testing,Integration Testing,14,Yes
+Testing,Validation Testing,28,Yes
+Deployment,Deployment Preparation,14,Yes
+Deployment,Deployment,14,Yes
+Maintenance,Monitoring,28,Yes
+Maintenance,Updates and Improvements,28,Yes

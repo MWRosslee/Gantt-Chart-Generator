@@ -1,0 +1,22 @@
+﻿maintask,subtask,duration,consequntial
+Conceptualization and Planning,Requirements Gathering,1 week,no
+Conceptualization and Planning,Stakeholder Identification,1 week,no
+Conceptualization and Planning,Feasibility Study,1 week,no
+Conceptualization and Planning,Risk Assessment,1 week,no
+System Design and Architecture,Identify Data Sources,1 week,no
+System Design and Architecture,Design Data Processing System,2 weeks,no
+System Design and Architecture,Design Prediction Model,2 weeks,no
+System Design and Architecture,Design Optimization Model,2 weeks,no
+System Design and Architecture,Design User Interface,3 weeks,no
+Development,Data Collection,1 month,no
+Development,Data Processing System Development,1 month,no
+Development,Prediction Model Development,1 month,no
+Development,Optimization Model Development,1 month,no
+Development,User Interface Development,1 month,no
+Testing,Unit Testing,2 weeks,no
+Testing,Integration Testing,2 weeks,no
+Testing,Validation Testing,1 month,no
+Deployment,Deployment Preparation,2 weeks,no
+Deployment,Deployment,2 weeks,no
+Maintenance,Monitoring,Ongoing,no
+Maintenance,Updates and Improvements,Ongoing,no
