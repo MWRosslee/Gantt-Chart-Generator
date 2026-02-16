@@ -3,6 +3,7 @@ import csv
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from xml.sax.saxutils import escape
 
 REQUIRED_COLUMNS = {"task", "subtask", "duration", "consequential"}
@@ -31,7 +32,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--title", default="Project Plan", help="Chart title")
     parser.add_argument(
         "--output",
-        help="Optional output path. Use .png for matplotlib output or .svg for no-dependency preview.",
+        help="Optional chart output path. Use .png for matplotlib output or .svg for no-dependency preview.",
+    )
+    parser.add_argument(
+        "--excel-output",
+        help="Optional .xlsx output path for xlwings export (task data + chart image when available).",
+    )
+    parser.add_argument(
+        "--excel-sheet",
+        default="Gantt Plan",
+        help="Excel sheet name used with --excel-output (default: Gantt Plan)",
     )
     return parser.parse_args()
 
@@ -133,7 +143,6 @@ def render_svg_preview(gantt_rows: list[GanttRow], title: str, output_path: str)
     lines.append('<rect width="100%" height="100%" fill="#ffffff"/>')
     lines.append(f'<text x="20" y="35" font-size="24" font-family="Arial">{escape(title)}</text>')
 
-    # Weekly guide lines
     for day in range(0, total_days + 1, 7):
         marker = min_date + timedelta(days=day)
         x = day_to_x(marker)
@@ -163,16 +172,21 @@ def render_svg_preview(gantt_rows: list[GanttRow], title: str, output_path: str)
     lines.append("</svg>")
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("\n".join(lines), encoding="utf-8-sig")
+    out.write_text("\n".join(lines), encoding="utf-8")
     print(f"Saved SVG preview to: {out}")
 
 
-def draw_with_matplotlib(gantt_rows: list[GanttRow], title: str, output_path: str | None) -> bool:
+def draw_with_matplotlib(
+    gantt_rows: list[GanttRow],
+    title: str,
+    output_path: str | None,
+    show_window: bool = True,
+) -> tuple[bool, str | None]:
     try:
         import matplotlib.dates as mdates
         import matplotlib.pyplot as plt
     except ModuleNotFoundError:
-        return False
+        return False, None
 
     fig, ax = plt.subplots(figsize=(11, 6))
     for row in gantt_rows:
@@ -188,14 +202,108 @@ def draw_with_matplotlib(gantt_rows: list[GanttRow], title: str, output_path: st
     fig.autofmt_xdate()
     fig.tight_layout()
 
+    image_path: str | None = None
     if output_path and Path(output_path).suffix.lower() != ".svg":
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(out, dpi=150)
+        image_path = str(out)
         print(f"Saved chart preview to: {out}")
 
-    plt.show()
-    return True
+    if show_window:
+        plt.show()
+    else:
+        plt.close(fig)
+
+    return True, image_path
+
+
+def export_to_excel_with_xlwings(
+    gantt_rows: list[GanttRow],
+    title: str,
+    workbook_path: str,
+    sheet_name: str,
+    chart_image_path: str | None,
+) -> bool:
+    try:
+        import xlwings as xw
+    except ModuleNotFoundError:
+        print("xlwings is not installed. Skipping Excel export.")
+        return False
+
+    out = Path(workbook_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    app = xw.App(visible=False, add_book=False)
+    app.display_alerts = False
+    app.screen_updating = False
+    try:
+        wb = app.books.add()
+        sheet = wb.sheets[0]
+        sheet.name = sheet_name[:31] or "Gantt Plan"
+
+        sheet.range("A1").value = title
+        sheet.range("A1").api.Font.Bold = True
+        sheet.range("A1").api.Font.Size = 14
+
+        headers = [["Task", "Subtask", "Start", "End", "Duration (days)"]]
+        sheet.range("A3").value = headers
+        sheet.range("A3:E3").api.Font.Bold = True
+
+        table_rows = [
+            [row.task, row.subtask, row.start.date().isoformat(), row.end.date().isoformat(), (row.end - row.start).days]
+            for row in gantt_rows
+        ]
+        if table_rows:
+            sheet.range("A4").value = table_rows
+
+        sheet.range("A:E").autofit()
+
+        if chart_image_path and Path(chart_image_path).exists():
+            sheet.pictures.add(
+                chart_image_path,
+                name="GanttPreview",
+                update=True,
+                left=sheet.range("G3").left,
+                top=sheet.range("G3").top,
+            )
+        elif not chart_image_path:
+            sheet.range("G3").value = "No PNG chart available."
+            sheet.range("G4").value = "Install matplotlib and run with --output chart.png"
+
+        wb.save(str(out))
+        wb.close()
+        print(f"Saved Excel workbook via xlwings to: {out}")
+        return True
+    finally:
+        app.quit()
+
+
+def ensure_png_for_excel(gantt_rows: list[GanttRow], title: str, preferred_output: str | None) -> str | None:
+    if preferred_output and Path(preferred_output).suffix.lower() == ".png":
+        used_matplotlib, image_path = draw_with_matplotlib(
+            gantt_rows,
+            title,
+            preferred_output,
+            show_window=False,
+        )
+        if used_matplotlib:
+            return image_path
+        return None
+
+    with NamedTemporaryFile(prefix="gantt_preview_", suffix=".png", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    used_matplotlib, image_path = draw_with_matplotlib(
+        gantt_rows,
+        title,
+        tmp_path,
+        show_window=False,
+    )
+    if not used_matplotlib:
+        Path(tmp_path).unlink(missing_ok=True)
+        return None
+    return image_path
 
 
 def main() -> None:
@@ -204,18 +312,26 @@ def main() -> None:
     tasks = load_tasks(args.csv)
     gantt_rows = build_gantt_rows(tasks, start_date)
 
-    # If user asks for SVG, always provide no-dependency preview.
     if args.output and Path(args.output).suffix.lower() == ".svg":
         render_svg_preview(gantt_rows, args.title, args.output)
-        return
+    else:
+        used_matplotlib, _ = draw_with_matplotlib(gantt_rows, args.title, args.output)
+        if not used_matplotlib:
+            fallback_output = args.output or "artifacts/gantt-preview.svg"
+            if Path(fallback_output).suffix.lower() != ".svg":
+                fallback_output = str(Path(fallback_output).with_suffix(".svg"))
+            render_svg_preview(gantt_rows, args.title, fallback_output)
+            print("matplotlib is not installed; generated SVG preview instead.")
 
-    used_matplotlib = draw_with_matplotlib(gantt_rows, args.title, args.output)
-    if not used_matplotlib:
-        fallback_output = args.output or "artifacts/gantt-preview.svg"
-        if Path(fallback_output).suffix.lower() != ".svg":
-            fallback_output = str(Path(fallback_output).with_suffix(".svg"))
-        render_svg_preview(gantt_rows, args.title, fallback_output)
-        print("matplotlib is not installed; generated SVG preview instead.")
+    if args.excel_output:
+        png_for_excel = ensure_png_for_excel(gantt_rows, args.title, args.output)
+        export_to_excel_with_xlwings(
+            gantt_rows,
+            args.title,
+            args.excel_output,
+            args.excel_sheet,
+            png_for_excel,
+        )
 
 
 if __name__ == "__main__":

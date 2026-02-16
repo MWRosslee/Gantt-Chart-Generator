@@ -1,6 +1,6 @@
 # Gantt-Chart-Generator
 
-A Python utility to generate a Gantt chart from task data in CSV format.
+A Python utility to generate a Gantt chart from task data in CSV format, with optional Excel export via **xlwings**.
 
 ## What it does
 
@@ -11,6 +11,7 @@ A Python utility to generate a Gantt chart from task data in CSV format.
 - Generates either:
   - interactive chart output with matplotlib (if installed), or
   - an SVG preview that works with standard Python only.
+- Optionally exports into Excel via `xlwings` (task table + chart image when available).
 
 ## CSV structure
 
@@ -34,10 +35,10 @@ Main Task 3,Sub Task 1,2,Yes
 
 ## Installation
 
-Optional dependency for interactive plotting:
+Optional dependencies:
 
 ```bash
-pip install matplotlib
+pip install matplotlib xlwings
 ```
 
 ## Usage
@@ -48,11 +49,19 @@ Prompted mode:
 python main.py
 ```
 
-Generate a preview file explicitly (recommended in restricted environments):
+Generate a preview file (works in restricted environments):
 
 ```bash
 python main.py --csv tasks.csv --start-date 2026-01-01 --output artifacts/gantt-preview.svg
 ```
+
+Generate Excel output using xlwings:
+
+```bash
+python main.py --csv tasks.csv --start-date 2026-01-01 --output artifacts/gantt-preview.png --excel-output artifacts/gantt-plan.xlsx
+```
+
+> If `matplotlib` is unavailable, Excel export still writes task data and notes that chart image generation was skipped.
 
 Optional arguments:
 
@@ -60,6 +69,8 @@ Optional arguments:
 - `--start-date` start date in `YYYY-MM-DD`
 - `--title` custom chart title
 - `--output` output path (`.svg` always works; image formats like `.png` require matplotlib)
+- `--excel-output` output `.xlsx` path for xlwings export
+- `--excel-sheet` sheet name for xlwings export (default: `Gantt Plan`)
 
 ## License
 
