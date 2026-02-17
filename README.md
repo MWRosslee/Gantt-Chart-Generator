@@ -1,40 +1,53 @@
 # Gantt-Chart-Generator
-This Python script generates a Gantt chart for project tasks and their sub-tasks using data from a CSV file. 
 
+A standalone **HTML Gantt Chart app** that runs fully in your browser and supports saving/loading plans as JSON.
 
-Project: Gantt Chart Generator
+## Features
 
-# Description
-This Python script generates a Gantt chart for project tasks and their sub-tasks using data from a CSV file. It's an easy way to visualize project timelines, task durations, and the sequence of tasks. The Gantt chart helps project managers to schedule tasks, manage resources more effectively, and monitor the progress of the project.
+- ✅ No backend required (single `index.html` file)
+- ✅ Edit task rows directly in the page
+- ✅ Per-task consequential scheduling logic
+- ✅ Live Gantt SVG preview
+- ✅ Save plan to `.json`
+- ✅ Load plan from `.json`
+- ✅ Export rendered chart to `.svg`
 
-The script uses the pandas library to read and process data from the CSV file, and the matplotlib library to create the Gantt chart.
+## Run
 
-# CSV File Structure
-The CSV file used as input should be structured as follows:
+Open `index.html` in any modern browser.
 
-task: The name of the main task
-subtask: The name of the sub-task
-duration: The duration of the sub-task in days
-consequential: Indicates if a sub-task should start immediately after the previous sub-task. This should be 'Yes' or 'No'
-Here is an example of a CSV file:
+If you prefer serving locally:
 
+```bash
+python3 -m http.server 8000
+```
 
-Copy code
-task,subtask,duration,consequential
-"Main Task 1","Sub Task 1",3,Yes
-"Main Task 1","Sub Task 2",4,Yes
-"Main Task 2","Sub Task 1",2,No
-"Main Task 2","Sub Task 2",1,Yes
-"Main Task 3","Sub Task 1",2,Yes
+Then open: `http://localhost:8000`
 
-Usage
-Install the necessary Python packages if you haven't already:
-Copy code
-pip install pandas matplotlib
-Run the Python script:
-Copy code
-python gantt_chart.py
-The script will prompt you to enter the start date of the project in YYYY-MM-DD format.
-The script will then read the tasks from the CSV file, prepare the data for the Gantt chart, and display the Gantt chart.
-License
-This project is licensed under the terms of the MIT license.
+## JSON format
+
+Saved files use this structure:
+
+```json
+{
+  "title": "Project Plan",
+  "startDate": "2026-01-01",
+  "rows": [
+    {
+      "task": "Planning",
+      "subtask": "Requirements",
+      "duration": 5,
+      "consequential": "Yes"
+    }
+  ]
+}
+```
+
+## Notes
+
+- `consequential = "Yes"` chains subtasks within the **same task**.
+- `consequential = "No"` starts that subtask at the global start date.
+
+## License
+
+MIT.

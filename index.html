@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gantt Chart Generator</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f8fafc; color: #0f172a; }
+    h1 { margin-bottom: 8px; }
+    .panel { background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    input, select, button { padding: 8px; border: 1px solid #94a3b8; border-radius: 8px; }
+    button { background: #2563eb; color: #fff; border: none; cursor: pointer; }
+    button.secondary { background: #64748b; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #cbd5e1; padding: 8px; font-size: 14px; }
+    th { background: #e2e8f0; }
+    .svg-wrap { overflow: auto; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; }
+    #status { font-size: 13px; color: #334155; }
+  </style>
+</head>
+<body>
+  <h1>Gantt Chart Generator (Standalone HTML App)</h1>
+  <p>Runs fully in your browser. Add/edit rows, render timeline, and save/load JSON files.</p>
+
+  <div class="panel">
+    <div class="row">
+      <label>Title <input id="title" value="Project Plan" /></label>
+      <label>Start Date <input id="startDate" type="date" /></label>
+      <button id="renderBtn">Render Chart</button>
+      <button id="addRowBtn" class="secondary">Add Row</button>
+    </div>
+
+    <table id="taskTable">
+      <thead>
+        <tr>
+          <th>Task</th><th>Subtask</th><th>Duration (days)</th><th>Consequential (Yes/No)</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <button id="saveJsonBtn">Save JSON</button>
+      <label style="display:inline-flex;align-items:center;gap:6px;">Load JSON <input id="loadJsonInput" type="file" accept="application/json" /></label>
+      <button id="saveSvgBtn" class="secondary">Save SVG</button>
+      <span id="status"></span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Preview</h3>
+    <div id="svgContainer" class="svg-wrap"></div>
+  </div>
+
+<script>
+const tbody = document.querySelector('#taskTable tbody');
+const titleInput = document.getElementById('title');
+const startDateInput = document.getElementById('startDate');
+const statusEl = document.getElementById('status');
+const svgContainer = document.getElementById('svgContainer');
+
+startDateInput.valueAsDate = new Date();
+
+const sampleRows = [
+  { task: 'Planning', subtask: 'Requirements', duration: 5, consequential: 'Yes' },
+  { task: 'Planning', subtask: 'Feasibility', duration: 3, consequential: 'Yes' },
+  { task: 'Development', subtask: 'Backend', duration: 7, consequential: 'No' },
+  { task: 'Development', subtask: 'Frontend', duration: 6, consequential: 'Yes' },
+];
+
+function setStatus(msg) { statusEl.textContent = msg; }
+
+function addRow(data = { task: '', subtask: '', duration: 1, consequential: 'Yes' }) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input value="${data.task}" /></td>
+    <td><input value="${data.subtask}" /></td>
+    <td><input type="number" min="1" value="${data.duration}" /></td>
+    <td>
+      <select>
+        <option ${String(data.consequential).toLowerCase()==='yes'?'selected':''}>Yes</option>
+        <option ${String(data.consequential).toLowerCase()==='no'?'selected':''}>No</option>
+      </select>
+    </td>
+    <td><button class="secondary">Delete</button></td>
+  `;
+  tr.querySelector('button').addEventListener('click', () => tr.remove());
+  tbody.appendChild(tr);
+}
+
+function collectRows() {
+  const rows = [];
+  for (const tr of tbody.querySelectorAll('tr')) {
+    const [taskEl, subtaskEl, durationEl, consequentialEl] = tr.querySelectorAll('input, select');
+    const row = {
+      task: taskEl.value.trim(),
+      subtask: subtaskEl.value.trim(),
+      duration: Number(durationEl.value),
+      consequential: consequentialEl.value,
+    };
+    if (!row.task || !row.subtask || !Number.isFinite(row.duration) || row.duration <= 0) {
+      throw new Error('Each row must have task, subtask, and positive duration.');
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+function buildGantt(rows, startDate) {
+  const latestByTask = new Map();
+  const result = [];
+  for (const r of rows) {
+    const key = r.task;
+    const start = (r.consequential === 'Yes' && latestByTask.has(key))
+      ? new Date(latestByTask.get(key))
+      : new Date(startDate);
+    const end = new Date(start);
+    end.setDate(end.getDate() + r.duration);
+    latestByTask.set(key, end);
+    result.push({ ...r, start, end });
+  }
+  return result;
+}
+
+function renderSvg(ganttRows, title) {
+  if (!ganttRows.length) return '<p>No data</p>';
+  const min = new Date(Math.min(...ganttRows.map(r => +r.start)));
+  const max = new Date(Math.max(...ganttRows.map(r => +r.end)));
+  const totalDays = Math.max(1, Math.round((max - min) / 86400000));
+
+  const left = 260, top = 70, rowH = 30, chartW = 980, barH = 16;
+  const width = left + chartW + 80;
+  const height = top + ganttRows.length * rowH + 80;
+
+  const toX = (d) => left + ((d - min) / 86400000) / totalDays * chartW;
+  const esc = (v) => String(v).replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  let out = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">`;
+  out += `<rect width="100%" height="100%" fill="#ffffff"/>`;
+  out += `<text x="20" y="35" font-size="24" font-family="Arial">${esc(title)}</text>`;
+
+  for (let d = 0; d <= totalDays; d += 7) {
+    const date = new Date(min); date.setDate(date.getDate() + d);
+    const x = toX(date);
+    out += `<line x1="${x.toFixed(2)}" y1="50" x2="${x.toFixed(2)}" y2="${height-30}" stroke="#e2e8f0"/>`;
+    out += `<text x="${(x+2).toFixed(2)}" y="60" font-size="10" fill="#64748b">${date.toISOString().slice(0,10)}</text>`;
+  }
+
+  ganttRows.forEach((r, i) => {
+    const y = top + i * rowH;
+    const x = toX(r.start);
+    const w = Math.max(2, toX(r.end) - x);
+    out += `<text x="20" y="${y+12}" font-size="12">${esc(r.task)} - ${esc(r.subtask)}</text>`;
+    out += `<rect x="${x.toFixed(2)}" y="${y}" width="${w.toFixed(2)}" height="${barH}" fill="#2563eb" rx="4"/>`;
+  });
+
+  out += '</svg>';
+  return out;
+}
+
+function downloadText(filename, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function render() {
+  try {
+    const rows = collectRows();
+    const start = new Date(startDateInput.value);
+    if (Number.isNaN(+start)) throw new Error('Select a valid start date.');
+    const gantt = buildGantt(rows, start);
+    svgContainer.innerHTML = renderSvg(gantt, titleInput.value.trim() || 'Project Plan');
+    setStatus(`Rendered ${rows.length} rows.`);
+  } catch (e) {
+    setStatus(e.message);
+  }
+}
+
+document.getElementById('addRowBtn').addEventListener('click', () => addRow());
+document.getElementById('renderBtn').addEventListener('click', render);
+
+document.getElementById('saveJsonBtn').addEventListener('click', () => {
+  try {
+    const data = {
+      title: titleInput.value,
+      startDate: startDateInput.value,
+      rows: collectRows(),
+    };
+    downloadText('gantt-plan.json', JSON.stringify(data, null, 2), 'application/json');
+    setStatus('Saved gantt-plan.json');
+  } catch (e) { setStatus(e.message); }
+});
+
+document.getElementById('loadJsonInput').addEventListener('change', async (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    titleInput.value = data.title || 'Project Plan';
+    startDateInput.value = data.startDate || new Date().toISOString().slice(0,10);
+    tbody.innerHTML = '';
+    (data.rows || []).forEach(addRow);
+    render();
+    setStatus(`Loaded ${file.name}`);
+  } catch (e) {
+    setStatus(`Invalid JSON file: ${e.message}`);
+  }
+});
+
+document.getElementById('saveSvgBtn').addEventListener('click', () => {
+  const svg = svgContainer.querySelector('svg');
+  if (!svg) return setStatus('Render chart first.');
+  downloadText('gantt-preview.svg', svg.outerHTML, 'image/svg+xml');
+  setStatus('Saved gantt-preview.svg');
+});
+
+sampleRows.forEach(addRow);
+render();
+</script>
+</body>
+</html>
