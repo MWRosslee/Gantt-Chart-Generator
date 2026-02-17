@@ -1,76 +1,52 @@
 # Gantt-Chart-Generator
 
-A Python utility to generate a Gantt chart from task data in CSV format, with optional Excel export via **xlwings**.
+A standalone **HTML Gantt Chart app** that runs fully in your browser and supports saving/loading plans as JSON.
 
-## What it does
+## Features
 
-- Reads tasks/subtasks from a CSV file.
-- Validates required columns and row values.
-- Supports a project start date (prompted or passed via CLI).
-- Builds per-task consequential timelines.
-- Generates either:
-  - interactive chart output with matplotlib (if installed), or
-  - an SVG preview that works with standard Python only.
-- Optionally exports into Excel via `xlwings` (task table + chart image when available).
+- ✅ No backend required (single `index.html` file)
+- ✅ Edit task rows directly in the page
+- ✅ Per-task consequential scheduling logic
+- ✅ Live Gantt SVG preview
+- ✅ Save plan to `.json`
+- ✅ Load plan from `.json`
+- ✅ Export rendered chart to `.svg`
 
-## CSV structure
+## Run
 
-The input CSV must include these columns:
+Open `index.html` in any modern browser.
 
-- `task`: Main task name.
-- `subtask`: Subtask name.
-- `duration`: Duration in days (must be positive).
-- `consequential`: `Yes` or `No`.
-
-Example:
-
-```csv
-task,subtask,duration,consequential
-Main Task 1,Sub Task 1,3,Yes
-Main Task 1,Sub Task 2,4,Yes
-Main Task 2,Sub Task 1,2,No
-Main Task 2,Sub Task 2,1,Yes
-Main Task 3,Sub Task 1,2,Yes
-```
-
-## Installation
-
-Optional dependencies:
+If you prefer serving locally:
 
 ```bash
-pip install matplotlib xlwings
+python3 -m http.server 8000
 ```
 
-## Usage
+Then open: `http://localhost:8000`
 
-Prompted mode:
+## JSON format
 
-```bash
-python main.py
+Saved files use this structure:
+
+```json
+{
+  "title": "Project Plan",
+  "startDate": "2026-01-01",
+  "rows": [
+    {
+      "task": "Planning",
+      "subtask": "Requirements",
+      "duration": 5,
+      "consequential": "Yes"
+    }
+  ]
+}
 ```
 
-Generate a preview file (works in restricted environments):
+## Notes
 
-```bash
-python main.py --csv tasks.csv --start-date 2026-01-01 --output artifacts/gantt-preview.svg
-```
-
-Generate Excel output using xlwings:
-
-```bash
-python main.py --csv tasks.csv --start-date 2026-01-01 --output artifacts/gantt-preview.png --excel-output artifacts/gantt-plan.xlsx
-```
-
-> If `matplotlib` is unavailable, Excel export still writes task data and notes that chart image generation was skipped.
-
-Optional arguments:
-
-- `--csv` path to CSV file (default: `tasks.csv`)
-- `--start-date` start date in `YYYY-MM-DD`
-- `--title` custom chart title
-- `--output` output path (`.svg` always works; image formats like `.png` require matplotlib)
-- `--excel-output` output `.xlsx` path for xlwings export
-- `--excel-sheet` sheet name for xlwings export (default: `Gantt Plan`)
+- `consequential = "Yes"` chains subtasks within the **same task**.
+- `consequential = "No"` starts that subtask at the global start date.
 
 ## License
 
