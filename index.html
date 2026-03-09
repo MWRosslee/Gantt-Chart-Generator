@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gantt Chart Generator</title>
+  <style>
+    :root { color-scheme: light; font-family: Arial, sans-serif; }
+    body { margin: 0; background: #f6f8fb; color: #1f2937; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .panel { background: #fff; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); padding: 16px; margin-bottom: 16px; }
+    .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; align-items: end; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; }
+    input, textarea, button { width: 100%; box-sizing: border-box; border: 1px solid #c8d1de; border-radius: 8px; padding: 10px; font-size: 14px; font-family: inherit; }
+    textarea { min-height: 220px; resize: vertical; }
+    button { background: #2563eb; border: none; color: #fff; cursor: pointer; font-weight: 700; }
+    button:hover { background: #1d4ed8; }
+    .hint { margin: 8px 0 0; font-size: 12px; color: #475569; line-height: 1.4; }
+    .error { color: #b91c1c; font-weight: 600; margin: 8px 0 0; }
+    .info-list { margin: 8px 0 0; color: #0f172a; font-size: 13px; }
+    .chart { overflow: auto; border: 1px solid #dbe3ef; border-radius: 8px; padding: 12px; background: #fcfdff; }
+    .timeline-header, .row { display: grid; align-items: center; margin-bottom: 6px; gap: 2px; }
+    .timeline-header { font-size: 12px; color: #4b5563; margin-bottom: 10px; }
+    .row-label { position: sticky; left: 0; background: #fcfdff; z-index: 2; font-size: 13px; font-weight: 600; border-right: 1px solid #e5e7eb; padding-right: 8px; min-width: 280px; max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bar-track { position: relative; height: 26px; background: repeating-linear-gradient(to right, #f3f4f6, #f3f4f6 24px, #ffffff 24px, #ffffff 48px); border-radius: 6px; }
+    .bar { position: absolute; top: 3px; height: 20px; border-radius: 999px; background: linear-gradient(90deg, #2563eb, #3b82f6); color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 0 8px; box-sizing: border-box; user-select: none; cursor: grab; }
+    .bar.dragging { cursor: grabbing; opacity: 0.9; }
+    .bar.critical { background: linear-gradient(90deg, #b91c1c, #ef4444); }
+    .legend { margin-top: 8px; font-size: 12px; color: #475569; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Gantt Chart Generator (HTML only)</h1>
+
+    <div class="panel">
+      <div class="controls">
+        <div>
+          <label for="startDate">Project start date</label>
+          <input id="startDate" type="date" />
+        </div>
+        <div>
+          <button id="renderChart">Generate chart</button>
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <label for="csvData">CSV data</label>
+        <textarea id="csvData">task_number,task,subtask,duration,depends_on,consequential,order
+1,Discovery,Requirements,2,,No,1
+2,Discovery,Sign-off,1,1,Yes,2
+3,Build,Backend,4,2,No,3
+4,Build,Frontend,3,2,No,4
+5,QA,Testing,2,3|4,No,5
+6,Release,Deployment,1,5,Yes,6</textarea>
+        <p class="hint">
+          You can now drag bars horizontally to edit task dates. After dragging, <code>start_date</code> and <code>end_date</code> are updated in the CSV textbox automatically.
+        </p>
+      </div>
+      <p id="error" class="error" aria-live="polite"></p>
+      <ul id="notifications" class="info-list"></ul>
+      <p id="criticalPath" class="hint"></p>
+    </div>
+
+    <div class="panel">
+      <h2 style="margin-top:0;">Project Plan</h2>
+      <div id="chart" class="chart"></div>
+      <div class="legend">Blue bars = normal tasks, Red bars = critical path, Drag bars to move task dates.</div>
+    </div>
+  </div>
+
+  <script>
+    const dayWidth = 32;
+    let appState = null;
+
+    function parseCsvLine(line) {
+      const result = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+          if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+          else { inQuotes = !inQuotes; }
+        } else if (char === ',' && !inQuotes) { result.push(current.trim()); current = ''; }
+        else { current += char; }
+      }
+      result.push(current.trim());
+      return result;
+    }
+
+    function normalizeHeader(header) { return header.toLowerCase().replace(/[\s_-]+/g, ''); }
+    function findHeaderIndex(headers, aliases, required = false) {
+      const idx = headers.findIndex((h) => aliases.includes(h));
+      if (required && idx === -1) throw new Error(`Missing required column. Acceptable names: ${aliases.join(', ')}`);
+      return idx;
+    }
+    function parseDependencies(cell) {
+      if (!cell) return [];
+      return cell.split(/[|;]+/).map((p) => p.trim()).filter(Boolean);
+    }
+
+    function parseCsv(text) {
+      const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      if (lines.length < 2) throw new Error('Please provide a header and at least one task row.');
+
+      const headerCells = parseCsvLine(lines[0]);
+      const headersNormalized = headerCells.map(normalizeHeader);
+      const index = {
+        task: findHeaderIndex(headersNormalized, ['task'], true),
+        subtask: findHeaderIndex(headersNormalized, ['subtask'], true),
+        duration: findHeaderIndex(headersNormalized, ['duration'], true),
+        consequential: findHeaderIndex(headersNormalized, ['consequential']),
+        order: findHeaderIndex(headersNormalized, ['order', 'sort', 'sequence', 'rank']),
+        taskNumber: findHeaderIndex(headersNormalized, ['tasknumber', 'id', 'taskid', 'number']),
+        dependsOn: findHeaderIndex(headersNormalized, ['dependson', 'dependency', 'dependencies', 'predecessor', 'blockedby']),
+        startDate: findHeaderIndex(headersNormalized, ['startdate']),
+        endDate: findHeaderIndex(headersNormalized, ['enddate'])
+      };
+
+      const rows = lines.slice(1).map((line, rowIndex) => {
+        const cells = parseCsvLine(line);
+        const duration = Number(cells[index.duration]);
+        if (!Number.isFinite(duration) || duration <= 0) throw new Error(`Invalid duration on row ${rowIndex + 2}.`);
+
+        const orderValue = index.order >= 0 ? Number(cells[index.order]) : Number.NaN;
+        const id = index.taskNumber >= 0 ? (cells[index.taskNumber] || `${rowIndex + 1}`).trim() : `${rowIndex + 1}`;
+
+        return {
+          id,
+          task: cells[index.task] || `Task ${rowIndex + 1}`,
+          subtask: cells[index.subtask] || 'Subtask',
+          duration,
+          consequential: index.consequential >= 0 ? (cells[index.consequential] || '').toLowerCase() === 'yes' : false,
+          dependencies: index.dependsOn >= 0 ? parseDependencies(cells[index.dependsOn]) : [],
+          order: Number.isFinite(orderValue) ? orderValue : rowIndex,
+          originalIndex: rowIndex,
+          originalCells: cells
+        };
+      });
+
+      rows.sort((a, b) => (a.order - b.order) || (a.originalIndex - b.originalIndex));
+      return { rows, headerCells, headersNormalized, index };
+    }
+
+    function addDays(date, days) { const d = new Date(date); d.setDate(d.getDate() + days); return d; }
+    function formatDate(date) { return date.toISOString().slice(0, 10); }
+
+    function buildSchedule(tasks, startDate) {
+      const byId = new Map(tasks.map((t) => [t.id, t]));
+      const scheduled = [];
+      const endById = new Map();
+      const notifications = [];
+      let chainCursor = new Date(startDate);
+
+      for (const row of tasks) {
+        let start = new Date(startDate);
+        if (row.dependencies.length > 0) {
+          let maxEnd = new Date(startDate);
+          for (const depId of row.dependencies) {
+            if (!byId.has(depId)) throw new Error(`Task ${row.id} references unknown dependency: ${depId}`);
+            const depEnd = endById.get(depId);
+            if (!depEnd) throw new Error(`Dependency ${depId} for task ${row.id} appears after the dependent task. Sort rows so dependencies come first.`);
+            if (depEnd > maxEnd) maxEnd = depEnd;
+            notifications.push(`Task ${row.id} waits for task ${depId} before it can start.`);
+          }
+          start = maxEnd;
+        } else if (row.consequential) {
+          start = new Date(chainCursor);
+        }
+
+        const end = addDays(start, row.duration);
+        const item = { ...row, start, end };
+        scheduled.push(item);
+        endById.set(row.id, end);
+        if (row.consequential) chainCursor = end;
+      }
+
+      return { scheduled, notifications };
+    }
+
+    function computeCriticalPath(scheduled) {
+      const bestDurationTo = new Map();
+      const predecessor = new Map();
+      for (const task of scheduled) {
+        let best = task.duration;
+        let bestPred = null;
+        for (const depId of task.dependencies) {
+          const depBest = bestDurationTo.get(depId);
+          if (depBest == null) continue;
+          const candidate = depBest + task.duration;
+          if (candidate > best) { best = candidate; bestPred = depId; }
+        }
+        bestDurationTo.set(task.id, best);
+        predecessor.set(task.id, bestPred);
+      }
+
+      let endTask = null;
+      let maxDuration = -1;
+      for (const task of scheduled) {
+        const value = bestDurationTo.get(task.id) || task.duration;
+        if (value > maxDuration) { maxDuration = value; endTask = task.id; }
+      }
+
+      const path = [];
+      while (endTask) { path.unshift(endTask); endTask = predecessor.get(endTask); }
+      return { path, pathSet: new Set(path), totalDuration: Math.max(0, maxDuration) };
+    }
+
+    function csvEscape(value) {
+      const text = String(value ?? '');
+      if (text.includes(',') || text.includes('"') || text.includes('\n')) {
+        return `"${text.replace(/"/g, '""')}"`;
+      }
+      return text;
+    }
+
+    function writeBackCsv() {
+      if (!appState) return;
+      const { parsed, scheduledById } = appState;
+      const headers = [...parsed.headerCells];
+      const normalized = [...parsed.headersNormalized];
+
+      let startIdx = parsed.index.startDate;
+      if (startIdx < 0) { headers.push('start_date'); normalized.push('startdate'); startIdx = headers.length - 1; }
+
+      let endIdx = parsed.index.endDate;
+      if (endIdx < 0) { headers.push('end_date'); normalized.push('enddate'); endIdx = headers.length - 1; }
+
+      const lines = [headers.map(csvEscape).join(',')];
+      for (const row of appState.tasksOriginalOrder) {
+        const rowCells = [...row.originalCells];
+        while (rowCells.length < headers.length) rowCells.push('');
+
+        const scheduled = scheduledById.get(row.id);
+        rowCells[startIdx] = formatDate(scheduled.start);
+        rowCells[endIdx] = formatDate(scheduled.end);
+        lines.push(rowCells.map(csvEscape).join(','));
+      }
+
+      document.getElementById('csvData').value = lines.join('\n');
+      appState.parsed.headerCells = headers;
+      appState.parsed.headersNormalized = normalized;
+      appState.parsed.index.startDate = startIdx;
+      appState.parsed.index.endDate = endIdx;
+    }
+
+    function installDrag(bar, taskId, startDate, criticalPath) {
+      let startX = 0;
+      let startLeft = 0;
+      const onMove = (event) => {
+        const deltaPx = event.clientX - startX;
+        bar.style.left = `${Math.max(0, startLeft + deltaPx)}px`;
+      };
+      const onUp = (event) => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        bar.classList.remove('dragging');
+
+        const deltaPx = event.clientX - startX;
+        const deltaDays = Math.round(deltaPx / dayWidth);
+        if (deltaDays !== 0) {
+          const task = appState.scheduled.find((t) => t.id === taskId);
+          task.start = addDays(task.start, deltaDays);
+          task.end = addDays(task.end, deltaDays);
+
+          appState.scheduledById.set(taskId, task);
+          const newCritical = computeCriticalPath(appState.scheduled);
+          appState.criticalPath = newCritical;
+          render(appState.scheduled, startDate, newCritical);
+          writeBackCsv();
+        } else {
+          render(appState.scheduled, startDate, criticalPath);
+        }
+      };
+
+      bar.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        startX = event.clientX;
+        startLeft = parseFloat(bar.style.left || '0');
+        bar.classList.add('dragging');
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+      });
+    }
+
+    function render(scheduled, startDate, criticalPath) {
+      const chart = document.getElementById('chart');
+      chart.innerHTML = '';
+      if (!scheduled.length) { chart.textContent = 'No data to display.'; return; }
+
+      const totalDays = Math.max(...scheduled.map((r) => Math.ceil((r.end - startDate) / 86400000)));
+      const chartWidth = Math.max(650, totalDays * dayWidth);
+
+      const header = document.createElement('div');
+      header.className = 'timeline-header';
+      header.style.gridTemplateColumns = `280px ${chartWidth}px`;
+
+      const headerLabel = document.createElement('div');
+      headerLabel.className = 'row-label';
+      headerLabel.textContent = 'Task Number - Task / Subtask';
+
+      const axis = document.createElement('div');
+      axis.style.display = 'grid';
+      axis.style.gridTemplateColumns = `repeat(${totalDays}, ${dayWidth}px)`;
+      axis.style.fontSize = '11px';
+
+      for (let i = 0; i < totalDays; i++) {
+        const tick = document.createElement('div');
+        tick.textContent = formatDate(addDays(startDate, i)).slice(5);
+        axis.appendChild(tick);
+      }
+
+      header.appendChild(headerLabel);
+      header.appendChild(axis);
+      chart.appendChild(header);
+
+      for (const row of scheduled) {
+        const rowEl = document.createElement('div');
+        rowEl.className = 'row';
+        rowEl.style.gridTemplateColumns = `280px ${chartWidth}px`;
+
+        const label = document.createElement('div');
+        label.className = 'row-label';
+        label.textContent = `${row.id} - ${row.task} / ${row.subtask}`;
+
+        const track = document.createElement('div');
+        track.className = 'bar-track';
+        track.style.width = `${chartWidth}px`;
+
+        const offsetDays = Math.floor((row.start - startDate) / 86400000);
+        const bar = document.createElement('div');
+        bar.className = `bar${criticalPath.pathSet.has(row.id) ? ' critical' : ''}`;
+        bar.style.left = `${Math.max(0, offsetDays * dayWidth)}px`;
+        bar.style.width = `${Math.max(dayWidth, row.duration * dayWidth)}px`;
+        bar.textContent = `${row.duration}d`;
+
+        installDrag(bar, row.id, startDate, criticalPath);
+
+        track.appendChild(bar);
+        rowEl.appendChild(label);
+        rowEl.appendChild(track);
+        chart.appendChild(rowEl);
+      }
+
+      const criticalEl = document.getElementById('criticalPath');
+      criticalEl.textContent = criticalPath.path.length ? `Critical path: ${criticalPath.path.join(' -> ')} (${criticalPath.totalDuration} day(s))` : '';
+    }
+
+    function generateChart() {
+      const errorEl = document.getElementById('error');
+      const notificationList = document.getElementById('notifications');
+      errorEl.textContent = '';
+      notificationList.innerHTML = '';
+
+      try {
+        const startInput = document.getElementById('startDate').value;
+        if (!startInput) throw new Error('Please choose a project start date.');
+        const startDate = new Date(`${startInput}T00:00:00`);
+
+        const parsed = parseCsv(document.getElementById('csvData').value);
+        const tasksOriginalOrder = parsed.rows.slice().sort((a, b) => a.originalIndex - b.originalIndex);
+        const built = buildSchedule(parsed.rows, startDate);
+        const critical = computeCriticalPath(built.scheduled);
+
+        appState = {
+          parsed,
+          tasksOriginalOrder,
+          scheduled: built.scheduled,
+          scheduledById: new Map(built.scheduled.map((t) => [t.id, t])),
+          criticalPath: critical,
+          startDate
+        };
+
+        render(built.scheduled, startDate, critical);
+        for (const message of built.notifications) {
+          const li = document.createElement('li');
+          li.textContent = message;
+          notificationList.appendChild(li);
+        }
+
+        writeBackCsv();
+      } catch (error) {
+        document.getElementById('chart').innerHTML = '';
+        document.getElementById('criticalPath').textContent = '';
+        errorEl.textContent = error.message;
+      }
+    }
+
+    document.getElementById('renderChart').addEventListener('click', generateChart);
+    document.getElementById('startDate').value = new Date().toISOString().slice(0, 10);
+    generateChart();
+  </script>
+</body>
+</html>
