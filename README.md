@@ -1,40 +1,56 @@
 # Gantt-Chart-Generator
-This Python script generates a Gantt chart for project tasks and their sub-tasks using data from a CSV file. 
 
+A lightweight **HTML-only** Gantt chart generator that runs entirely in the browser.
 
-Project: Gantt Chart Generator
+## Description
 
-# Description
-This Python script generates a Gantt chart for project tasks and their sub-tasks using data from a CSV file. It's an easy way to visualize project timelines, task durations, and the sequence of tasks. The Gantt chart helps project managers to schedule tasks, manage resources more effectively, and monitor the progress of the project.
+This project provides a single-page web app (`index.html`) that converts CSV task data into a Gantt chart visualization with:
+- task numbering / sequencing,
+- dependency notifications,
+- critical path highlighting,
+- and **drag-to-edit scheduling** (move bars horizontally to change dates).
 
-The script uses the pandas library to read and process data from the CSV file, and the matplotlib library to create the Gantt chart.
+No Python, Node.js, or backend is required.
 
-# CSV File Structure
-The CSV file used as input should be structured as follows:
+## CSV Format
 
-task: The name of the main task
-subtask: The name of the sub-task
-duration: The duration of the sub-task in days
-consequential: Indicates if a sub-task should start immediately after the previous sub-task. This should be 'Yes' or 'No'
-Here is an example of a CSV file:
+### Required columns
 
+- `task`
+- `subtask`
+- `duration` (positive number of days)
 
-Copy code
-task,subtask,duration,consequential
-"Main Task 1","Sub Task 1",3,Yes
-"Main Task 1","Sub Task 2",4,Yes
-"Main Task 2","Sub Task 1",2,No
-"Main Task 2","Sub Task 2",1,Yes
-"Main Task 3","Sub Task 1",2,Yes
+### Optional sequencing and dependency columns
 
-Usage
-Install the necessary Python packages if you haven't already:
-Copy code
-pip install pandas matplotlib
-Run the Python script:
-Copy code
-python gantt_chart.py
-The script will prompt you to enter the start date of the project in YYYY-MM-DD format.
-The script will then read the tasks from the CSV file, prepare the data for the Gantt chart, and display the Gantt chart.
-License
-This project is licensed under the terms of the MIT license.
+- Task number aliases: `task_number`, `tasknumber`, `id`, `task_id`, `number`
+- Dependency aliases: `depends_on`, `dependency`, `dependencies`, `predecessor`, `blocked_by`
+  - For multiple dependencies, separate values with `|` or `;` (example: `3|4`).
+- Consequential flag: `consequential` (`Yes` / `No`)
+- Sort aliases: `order`, `sort`, `sequence`, `rank`
+- Date output columns (auto-maintained by UI): `start_date`, `end_date`
+- Any other additional columns are allowed and preserved in the CSV textbox.
+
+## Example CSV
+
+```csv
+task_number,task,subtask,duration,depends_on,consequential,order
+1,Discovery,Requirements,2,,No,1
+2,Discovery,Sign-off,1,1,Yes,2
+3,Build,Backend,4,2,No,3
+4,Build,Frontend,3,2,No,4
+5,QA,Testing,2,3|4,No,5
+6,Release,Deployment,1,5,Yes,6
+```
+
+## Usage
+
+1. Open `index.html` in your browser.
+2. Pick a project start date.
+3. Paste or edit CSV task data.
+4. Click **Generate chart**.
+5. Drag bars left/right to edit schedule dates.
+6. The CSV data box is updated automatically with `start_date` and `end_date` for each task.
+
+## License
+
+This project is licensed under the MIT License.
